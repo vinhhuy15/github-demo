@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <title>Neon Rail: Strategic Protocol (Fixed v4.1)</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@500;700&display=swap');
+        
+        :root {
+            --bg-dark: #0b0c15;
+            --ui-glass: rgba(16, 18, 27, 0.95);
+            --neon-blue: #00f3ff;
+            --neon-purple: #bc13fe;
+            --neon-red: #ff2a6d;
+            --neon-gold: #ffc800;
+        }
+
+        body {
+            margin: 0; overflow: hidden;
+            background-color: var(--bg-dark);
+            color: white; font-family: 'Rajdhani', sans-serif;
+            user-select: none;
+        }
+
+        #gameCanvas { display: block; position: absolute; top:0; left:0; z-index: 1; }
+
+        /* --- UI LAYER --- */
+        #ui-layer {
+            position: absolute; bottom: 0; width: 100%; height: 220px;
+            background: linear-gradient(to top, rgba(0,0,0,0.9), transparent);
+            z-index: 10; pointer-events: none; /* Cho phép click xuyên qua vùng trống */
+            display: flex; justify-content: center; align-items: flex-end;
+            padding-bottom: 30px;
+        }
+
+        .controls-wrapper {
+            display: flex; gap: 40px; align-items: flex-end;
+            pointer-events: auto; /* Bắt buộc để nhận click vào vùng nút */
+        }
+
+        /* Action Buttons */
+        .skill-btn {
+            width: 90px; height: 90px;
+            border-radius: 50%;
+            background: rgba(30,30,40,0.9);
+            border: 2px solid #666;
+            display: flex; flex-direction: column;
+            justify-content: center; align-items: center;
+            cursor: pointer; position: relative;
+            transition: 0.2s; backdrop-filter: blur(5px);
+            user-select: none;
+        }
+        
+        /* QUAN TRỌNG: Tất cả nội dung bên trong nút không được chặn click */
+        .skill-btn * { pointer-events: none; } 
+
+        .skill-btn:hover { transform: scale(1.1); background: #333; border-color: white; }
+        .skill-btn.active { border-color: var(--neon-blue); box-shadow: 0 0 20px var(--neon-blue); transform: translateY(-10px); }
+        .skill-btn.disabled { opacity: 0.3; pointer-events: none; filter: grayscale(1); }
+
+        .ult-btn { width: 110px; height: 110px; border-color: var(--neon-gold); }
+        .ult-btn.ready {
+            background: radial-gradient(circle, rgba(255,200,0,0.3), rgba(0,0,0,0.8));
+            animation: pulse-gold 1.5s infinite;
+            border-color: var(--neon-gold); box-shadow: 0 0 20px var(--neon-gold);
+        }
+
+        .btn-key { position: absolute; top: -12px; background: #fff; color: #000; padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 12px; box-shadow: 0 2px 5px black;}
+        
+        /* Floating Target Cursor */
+        #target-cursor {
+            position: absolute; width: 80px; height: 80px;
+            border: 2px dashed var(--neon-red); border-radius: 50%;
+            pointer-events: none; display: none;
+            animation: spin 4s linear infinite; z-index: 50;
+            box-shadow: 0 0 15px var(--neon-red);
+        }
+
+        /* System Log */
+        #sys-log {
+            position: absolute; top: 10px; right: 10px;
+            font-family: 'Consolas', monospace; font-size: 12px;
+            color: #0f0; text-align: right; z-index: 100;
+            pointer-events: none; text-shadow: 1px 1px black;
+        }
+
+        /* Char Status */
+        #char-status { position: absolute; bottom: 30px; left: 30px; display: flex; gap: 15px; z-index: 15; pointer-events: none;}
+        .status-card { background: var(--ui-glass); padding: 10px; border-radius: 8px; border: 1px solid #444; width: 180px; transition: 0.3s; }
+        .status-card.active { border-color: var(--neon-gold); box-shadow: 0 0 15px rgba(255, 200, 0, 0.3); }
+
+        /* Overlays */
+        #cinematic { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: black; z-index: 100; opacity: 0; pointer-events: none; display: flex; align-items: center; justify-content: center; transition: 0.3s; }
+        #ult-text { font-family: 'Orbitron'; font-size: 80px; font-weight: 900; color: white; transform: scale(0); transition: 0.1s; }
+
+        .modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(5,5,10,0.98); z-index: 999; display: flex; flex-direction: column; justify-content: center; align-items: center; }
+        .hidden { display: none !important; }
+        
+        button.start-btn { background: transparent; border: 2px solid var(--neon-blue); color: white; padding: 20px 60px; font-family: 'Orbitron'; font-size: 24px; cursor: pointer; transition: 0.3s; pointer-events: auto; }
+        button.start-btn:hover { background: var(--neon-blue); color: black; box-shadow: 0 0 40px var(--neon-blue); }
+
+        @keyframes pulse-gold { 0% { box-shadow: 0 0 0 0 rgba(255,200,0,0.7); } 100% { box-shadow: 0 0 0 20px transparent; } }
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+
+    <div id="sys-log">SYSTEM ONLINE</div>
+    <div id="cinematic"><div id="ult-text">ULTIMATE</div></div>
+    <div id="target-cursor"></div>
+
+    <div id="start-screen" class="modal">
+        <h1 style="font-family:'Orbitron'; font-size:60px; color:var(--neon-blue); margin-bottom:10px">NEON RAIL</h1>
+        <h2 style="color:#aaa; font-weight:400; margin-bottom:40px">STRATEGIC PROTOCOL v4.1</h2>
+        <button class="start-btn" onclick="startGame()">INITIATE BATTLE</button>
+        <p style="color:#666; margin-top:20px;">Fix: Mouse Click & Z-Index Optimized</p>
+    </div>
+
+    <div id="game-over" class="modal hidden">
+        <h1 id="end-title" style="font-family:'Orbitron'; font-size:60px; color:white">VICTORY</h1>
+        <button class="start-btn" onclick="location.reload()">REBOOT</button>
+    </div>
+
+    <div id="char-status"></div>
+
+    <div id="ui-layer">
+        <div class="controls-wrapper">
+            <div id="btn-atk" class="skill-btn disabled" onclick="selectAction('atk')">
+                <div class="btn-key">Q</div>
+                <div style="font-size:24px">⚔️</div>
+                <div style="font-size:12px; font-weight:bold; color:#aaa">ATK</div>
+                <div style="font-size:10px; color:#0f0">+1 SP</div>
+            </div>
+            <div id="btn-skill" class="skill-btn disabled" onclick="selectAction('skill')">
+                <div class="btn-key">E</div>
+                <div style="font-size:24px">⚡</div>
+                <div style="font-size:12px; font-weight:bold; color:#aaa">SKILL</div>
+                <div style="font-size:10px; color:orange">-1 SP</div>
+            </div>
+            <div id="btn-ult" class="skill-btn ult-btn disabled" onclick="selectAction('ult')">
+                <div class="btn-key">R</div>
+                <div style="font-size:30px">🌌</div>
+                <div style="font-size:12px; font-weight:bold; color:#aaa">ULTIMATE</div>
+            </div>
+        </div>
+    </div>
+
+    <canvas id="gameCanvas"></canvas>
+
+<script>
+/**
+ * NEON RAIL v4.1 - The "Unstoppable" Fix
+ */
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+let W = window.innerWidth, H = window.innerHeight;
+canvas.width = W; canvas.height = H;
+
+const MAX_SP = 5;
+const COLORS = { Fire: '#ff2a6d', Ice: '#00f3ff', Quantum: '#bc13fe', Gold: '#ffc800', Red: '#ff0000' };
+
+function log(msg) { document.getElementById('sys-log').innerText = msg; }
+
+// --- UNIT CLASS ---
+class Unit {
+    constructor(name, type, element, hp, maxShield, speed) {
+        this.name = name; this.type = type; this.element = element;
+        this.maxHp = hp; this.hp = hp; this.maxShield = maxShield; this.shield = maxShield;
+        this.speed = speed; this.energy = 60; this.maxEnergy = 120;
+        this.x = 0; this.y = 0; this.shake = 0; this.isDead = false; this.isBroken = false;
+        this.buffs = [];
+    }
+    
+    draw(ctx, isTurn, isHovered) {
+        if (this.isDead) return;
+        let dx = this.x + (Math.random()-0.5)*this.shake;
+        let dy = this.y + (Math.random()-0.5)*this.shake + Math.sin(Date.now()/500)*5;
+
+        // Selection Halo
+        if (isHovered) {
+            ctx.strokeStyle = "white"; ctx.lineWidth = 2; ctx.setLineDash([5, 5]);
+            ctx.beginPath(); ctx.arc(dx, dy-30, 70, 0, Math.PI*2); ctx.stroke(); ctx.setLineDash([]);
+        }
+
+        // Body
+        ctx.shadowBlur = 15; ctx.shadowColor = COLORS[this.element];
+        if (this.type === 'player') {
+            ctx.fillStyle = COLORS[this.element];
+            ctx.beginPath(); ctx.moveTo(dx, dy-50); ctx.lineTo(dx-25, dy+30); ctx.lineTo(dx+25, dy+30); ctx.fill();
+            ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(dx, dy-50, 12, 0, Math.PI*2); ctx.fill();
+            // Turn Marker
+            if (isTurn) {
+                ctx.strokeStyle = COLORS.Gold; ctx.lineWidth = 3;
+                ctx.beginPath(); ctx.moveTo(dx, dy-90); ctx.lineTo(dx-10, dy-110); ctx.lineTo(dx+10, dy-110); ctx.closePath(); ctx.stroke();
+            }
+        } else {
+            let scale = this.name === 'BOSS' ? 1.5 : 0.8;
+            ctx.fillStyle = "#222"; ctx.fillRect(dx - 40*scale, dy - 60*scale, 80*scale, 100*scale);
+            ctx.fillStyle = this.isBroken ? "#555" : COLORS[this.element];
+            ctx.beginPath(); ctx.arc(dx, dy - 20*scale, 15*scale, 0, Math.PI*2); ctx.fill();
+            // Text
+            ctx.fillStyle = "white"; ctx.font = "12px sans-serif"; ctx.textAlign="center";
+            ctx.fillText(this.isBroken?"BREAK":this.element[0], dx, dy - 70*scale);
+        }
+        ctx.shadowBlur = 0;
+
+        // Bars
+        const w = 80;
+        if (this.maxShield > 0) {
+            ctx.fillStyle = "rgba(0,0,0,0.5)"; ctx.fillRect(dx-w/2, dy-100, w, 5);
+            ctx.fillStyle = "white"; ctx.fillRect(dx-w/2, dy-100, w * (Math.max(0,this.shield)/this.maxShield), 5);
+        }
+        ctx.fillStyle = "rgba(0,0,0,0.5)"; ctx.fillRect(dx-w/2, dy-94, w, 6);
+        ctx.fillStyle = this.type==='player' ? COLORS.Ice : COLORS.Red;
+        ctx.fillRect(dx-w/2, dy-94, w * (this.hp/this.maxHp), 6);
+    }
+}
+
+// --- STATE ---
+let units = [], turnQueue = [], currentTurn = 0, sp = 3, state = 'IDLE', selectedAction = null, hoveredUnit = null;
+let particles = [], texts = [];
+
+// Init
+const ronin = new Unit("Ronin", "player", "Fire", 3000, 0, 110);
+const hacker = new Unit("Hacker", "player", "Quantum", 2500, 0, 105);
+const boss = new Unit("BOSS", "enemy", "Fire", 8000, 300, 100);
+const minion = new Unit("Minion", "enemy", "Quantum", 1500, 80, 115);
+
+units = [ronin, hacker, minion, boss];
+ronin.x = 250; ronin.y = H/2 - 50;
+hacker.x = 200; hacker.y = H/2 + 80;
+boss.x = W - 250; boss.y = H/2;
+minion.x = W - 400; minion.y = H/2 - 100;
+
+function startGame() {
+    document.getElementById('start-screen').classList.add('hidden');
+    turnQueue = [...units].sort((a,b) => b.speed - a.speed);
+    
+    // Global Listeners
+    canvas.addEventListener('mousemove', onMouseMove);
+    canvas.addEventListener('mousedown', onMouseClick); // Use mousedown for faster response
+    window.addEventListener('keydown', onKeyDown);
+
+    log("BATTLE STARTED");
+    gameLoop();
+    startTurn();
+}
+
+function startTurn() {
+    if (checkEnd()) return;
+    let actor = turnQueue[currentTurn % turnQueue.length];
+    
+    if (actor.isDead) { currentTurn++; startTurn(); return; }
+
+    if (actor.type === 'player') {
+        state = 'IDLE';
+        log(`WAITING: ${actor.name}`);
+        updateUI();
+    } else {
+        state = 'ENEMY_ACTING';
+        log(`ENEMY TURN: ${actor.name}`);
+        updateUI();
+        setTimeout(() => enemyAI(actor), 1000);
+    }
+}
+
+// --- INPUTS ---
+function selectAction(type) {
+    if (state !== 'IDLE' && state !== 'SELECT_TARGET') return;
+    let actor = turnQueue[currentTurn % turnQueue.length];
+    
+    if (type === 'skill' && sp < 1) { log("NOT ENOUGH SP"); return; }
+    if (type === 'ult' && actor.energy < actor.maxEnergy) { log("ULT NOT READY"); return; }
+
+    selectedAction = type;
+    
+    if (type === 'skill' && actor.name === 'Ronin') {
+        // Self Buff Instant
+        executeAction(actor, actor);
+    } else if (type === 'ult') {
+        // Auto AOE
+        executeAction(actor, null);
+    } else {
+        state = 'SELECT_TARGET';
+        log("SELECT TARGET >>");
+        updateUI();
+    }
+}
+
+function onMouseMove(e) {
+    let rect = canvas.getBoundingClientRect();
+    let mx = e.clientX - rect.left;
+    let my = e.clientY - rect.top;
+    
+    hoveredUnit = null;
+    units.forEach(u => {
+        if (!u.isDead && Math.hypot(mx - u.x, my - u.y) < 70) hoveredUnit = u;
+    });
+
+    let cursor = document.getElementById('target-cursor');
+    if (state === 'SELECT_TARGET' && hoveredUnit && hoveredUnit.type === 'enemy') {
+        cursor.style.display = 'block';
+        cursor.style.left = (hoveredUnit.x - 40) + 'px';
+        cursor.style.top = (hoveredUnit.y - 40) + 'px';
+        canvas.style.cursor = 'pointer';
+    } else {
+        cursor.style.display = 'none';
+        canvas.style.cursor = 'default';
+    }
+}
+
+function onMouseClick(e) {
+    if (state === 'SELECT_TARGET' && hoveredUnit && hoveredUnit.type === 'enemy') {
+        let actor = turnQueue[currentTurn % turnQueue.length];
+        executeAction(actor, hoveredUnit);
+    }
+}
+
+function onKeyDown(e) {
+    if (state !== 'IDLE' && state !== 'SELECT_TARGET') return;
+    let k = e.key.toLowerCase();
+    if (k === 'q') selectAction('atk');
+    if (k === 'e') selectAction('skill');
+    if (k === 'r') selectAction('ult');
+}
+
+// --- ACTION ---
+function executeAction(actor, target) {
+    state = 'ANIMATING';
+    log(`EXECUTING: ${selectedAction.toUpperCase()}`);
+    updateUI(); // Disable buttons
+    
+    let type = selectedAction;
+    
+    // Sp Cost
+    if (type === 'atk') sp = Math.min(sp+1, MAX_SP);
+    if (type === 'skill') sp--;
+    if (type === 'ult') { actor.energy = 0; playCinematic(actor, target); return; }
+
+    performAnim(actor, target, type);
+}
+
+function performAnim(actor, target, type) {
+    let startX = actor.x;
+    let endX = target ? target.x + (actor.type==='player'?-80:80) : startX;
+    
+    // Tween
+    let p = 0;
+    let iv = setInterval(() => {
+        p += 0.1;
+        if (target) actor.x += (endX - actor.x) * 0.3;
+        
+        if (p > 1.2) {
+            clearInterval(iv);
+            
+            // Apply Effects
+            if (type === 'skill' && actor.name === 'Ronin') {
+                actor.hp -= actor.maxHp * 0.3;
+                spawnText(actor.x, actor.y, "BUFF UP", COLORS.Red);
+            } else {
+                let dmg = type === 'atk' ? 600 : 1200;
+                applyDmg(actor, target, dmg);
+            }
+
+            // Return
+            setTimeout(() => {
+                let retIv = setInterval(() => {
+                    actor.x += (startX - actor.x) * 0.2;
+                    if (Math.abs(actor.x - startX) < 2) {
+                        actor.x = startX;
+                        clearInterval(retIv);
+                        currentTurn++; selectedAction = null; startTurn();
+                    }
+                }, 16);
+            }, 300);
+        }
+    }, 16);
+}
+
+function applyDmg(att, def, dmg) {
+    att.energy = Math.min(att.maxEnergy, att.energy + 20);
+    let isWeak = (def.element === att.element) || def.isBroken;
+    
+    if (isWeak && !def.isBroken && def.maxShield > 0) {
+        def.shield -= 50;
+        if (def.shield <= 0) {
+            def.shield = 0; def.isBroken = true;
+            spawnText(def.x, def.y - 60, "BREAK!", COLORS.Gold);
+        }
+    }
+    
+    def.hp -= dmg; def.shake = 15;
+    spawnText(def.x, def.y, dmg, COLORS[att.element]);
+    if (def.hp <= 0) { def.hp = 0; def.isDead = true; }
+}
+
+function playCinematic(actor, target) {
+    let div = document.getElementById('cinematic');
+    let txt = document.getElementById('ult-text');
+    div.style.opacity = 1; txt.style.transform = "scale(1)";
+    
+    setTimeout(() => {
+        div.style.opacity = 0; txt.style.transform = "scale(0)";
+        
+        // AOE DMG
+        units.filter(u => u.type === 'enemy' && !u.isDead).forEach(e => {
+            applyDmg(actor, e, 2000);
+        });
+        
+        currentTurn++; selectedAction = null; startTurn();
+    }, 1500);
+}
+
+function enemyAI(actor) {
+    let targets = units.filter(u => u.type === 'player' && !u.isDead);
+    if (targets.length === 0) { currentTurn++; startTurn(); return; }
+    let t = targets[Math.floor(Math.random()*targets.length)];
+    
+    // Anim
+    let startX = actor.x;
+    let p = 0;
+    let iv = setInterval(() => {
+        p += 0.1;
+        actor.x += (t.x + 80 - actor.x) * 0.3;
+        if (p > 1.2) {
+            clearInterval(iv);
+            applyDmg(actor, t, 500);
+            setTimeout(() => {
+                actor.x = startX;
+                currentTurn++; startTurn();
+            }, 500);
+        }
+    }, 16);
+}
+
+// --- UI & FX ---
+function updateUI() {
+    let actor = turnQueue[currentTurn % turnQueue.length];
+    let isPlayer = actor.type === 'player';
+    
+    let btnAtk = document.getElementById('btn-atk');
+    let btnSkill = document.getElementById('btn-skill');
+    let btnUlt = document.getElementById('btn-ult');
+    
+    // Clear styles
+    [btnAtk, btnSkill, btnUlt].forEach(b => b.className = "skill-btn disabled");
+
+    if (isPlayer && state !== 'ANIMATING') {
+        btnAtk.className = "skill-btn " + (selectedAction==='atk'?'active':'');
+        
+        btnSkill.className = "skill-btn " + (selectedAction==='skill'?'active':'');
+        if (sp < 1) btnSkill.classList.add('disabled');
+        
+        btnUlt.className = "skill-btn ult-btn " + (selectedAction==='ult'?'active':'');
+        if (actor.energy >= actor.maxEnergy) btnUlt.classList.add('ready');
+        else btnUlt.classList.add('disabled');
+    }
+
+    // Update Status
+    let statusDiv = document.getElementById('char-status');
+    statusDiv.innerHTML = '';
+    units.filter(u => u.type === 'player').forEach(u => {
+        let isActive = u === actor;
+        statusDiv.innerHTML += `
+            <div class="status-card ${isActive?'active':''}" style="border-left: 4px solid ${COLORS[u.element]}">
+                <div style="font-weight:bold; font-size:14px; color:${COLORS[u.element]}">${u.name}</div>
+                <div style="font-size:12px; color:#aaa">HP: ${Math.floor(u.hp)} / ${u.maxHp}</div>
+                <div style="width:100%; height:4px; background:#333; margin-top:5px">
+                    <div style="width:${(u.energy/u.maxEnergy)*100}%; height:100%; background:${COLORS.Gold}"></div>
+                </div>
+            </div>`;
+    });
+}
+
+function spawnText(x, y, t, c) { texts.push({x, y, t, c, life: 60}); }
+function checkEnd() {
+    if (boss.isDead && minion.isDead) { document.getElementById('game-over').classList.remove('hidden'); return true; }
+    if (ronin.isDead && hacker.isDead) { 
+        let go = document.getElementById('game-over');
+        go.classList.remove('hidden'); 
+        document.getElementById('end-title').innerText = "DEFEAT";
+        document.getElementById('end-title').style.color = "red";
+        return true; 
+    }
+    return false;
+}
+
+// --- LOOP ---
+function loop() {
+    requestAnimationFrame(loop);
+    ctx.fillStyle = "#0b0c15"; ctx.fillRect(0,0,W,H);
+    
+    // Grid
+    ctx.strokeStyle = "rgba(0, 243, 255, 0.1)"; ctx.beginPath();
+    for(let i=0; i<W; i+=100) { ctx.moveTo(i, H/2); ctx.lineTo(i-W/2, H); } 
+    for(let i=H/2; i<H; i+=50) { ctx.moveTo(0, i); ctx.lineTo(W, i); }
+    ctx.stroke();
+
+    units.sort((a,b)=>a.y-b.y).forEach(u => {
+        let isTurn = turnQueue[currentTurn%turnQueue.length] === u;
+        let isHover = hoveredUnit === u;
+        u.draw(ctx, isTurn, isHover);
+    });
+
+    texts.forEach((t,i)=>{
+        t.y-=1; t.life--;
+        ctx.font="bold 20px 'Orbitron'"; ctx.fillStyle=t.c; ctx.fillText(t.t, t.x, t.y);
+        if(t.life<=0) texts.splice(i,1);
+    });
+}
+
+// Resize
+window.addEventListener('resize', () => { W=window.innerWidth; H=window.innerHeight; canvas.width=W; canvas.height=H; });
+
+</script>
+</body>
+</html>
